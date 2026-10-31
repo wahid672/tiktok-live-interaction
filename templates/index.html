@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TikTok LIVE Interaction - Web Dashboard</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navbar -->
+    <header class="navbar">
+      <div class="brand">
+        <div class="logo-icon">⚡</div>
+        <div class="brand-text">
+          <h1>TikTok LIVE Interaction</h1>
+          <span class="subtitle">Standalone RTMP Streamer & Interactive Suite</span>
+        </div>
+      </div>
+      <div class="status-bar">
+        <div class="status-item" id="tiktokStatusBadge">
+          <span class="dot yellow"></span>
+          <span class="label">Mengecek TikTok...</span>
+        </div>
+        <div class="status-item" id="streamStatusBadge">
+          <span class="dot gray"></span>
+          <span class="label">OFFLINE</span>
+        </div>
+        <div class="duration-badge" id="streamDurationBadge">
+          ⏱️ <span id="streamTimer">00:00:00</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="dashboard-grid">
+      <!-- Left Panel: Tabs & Controls -->
+      <section class="control-card">
+        <!-- Tabs Nav -->
+        <div class="tabs-nav">
+          <button class="tab-btn active" data-tab="tab-streamer">
+            📡 Kontrol Siaran
+          </button>
+          <button class="tab-btn" data-tab="tab-game">
+            🎮 Game Tebak Matematika
+          </button>
+          <button class="tab-btn" data-tab="tab-logs">
+            📋 Terminal Logs
+          </button>
+        </div>
+
+        <!-- Tab 1: Streamer Controls -->
+        <div class="tab-content active" id="tab-streamer">
+          <form id="streamForm" onsubmit="return false;">
+            <div class="form-group">
+              <label for="streamTitle">Judul Live TikTok</label>
+              <input type="text" id="streamTitle" class="form-input" placeholder="Contoh: Kuis Tebak Matematika Berhadiah!" value="Live Kuis Matematika Seru!">
+              <small class="helper-text">Judul akan otomatis didaftarkan ke TikTok LIVE saat mulai siaran.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="overlayUrl">Link Aplikasi / Web Overlay</label>
+              <div class="input-with-button">
+                <input type="url" id="overlayUrl" class="form-input" value="http://localhost:3000" placeholder="http://localhost:3000">
+                <button type="button" class="btn-secondary" id="reloadPreviewBtn">🔄 Refresh</button>
+              </div>
+              <small class="helper-text">Halaman web ini yang akan di-render dan di-push otomatis ke live TikTok tanpa butuh OBS!</small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group col">
+                <label for="streamResolution">Resolusi Kanvas</label>
+                <select id="streamResolution" class="form-select">
+                  <option value="720x1280" selected>Vertikal 720 × 1280 (Rekomendasi)</option>
+                  <option value="1080x1920">Vertikal 1080 × 1920 (Full HD)</option>
+                </select>
+              </div>
+              <div class="form-group col">
+                <label for="streamFps">Frame Rate & Bitrate</label>
+                <select id="streamFps" class="form-select">
+                  <option value="30|2500" selected>30 FPS - 2500 kbps (Stabil)</option>
+                  <option value="30|3500">30 FPS - 3500 kbps (Jernih)</option>
+                  <option value="60|4500">60 FPS - 4500 kbps (Halus)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="info-box">
+              <div class="info-icon">💡</div>
+              <div class="info-content">
+                <strong>Audio Otomatis Terhubung:</strong> Suara efek kuis (ding, konfeti, timer) langsung ditangkap dari sistem audio komputer (Virtual Sink) dan dikirim jernih ke penonton TikTok.
+              </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+              <button type="button" class="btn-start" id="startStreamBtn">
+                <span class="btn-icon">🚀</span> Mulai Live Sekarang
+              </button>
+              <button type="button" class="btn-stop hidden" id="stopStreamBtn">
+                <span class="btn-icon">⏹️</span> Akhiri Live
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tab 2: Game Controls -->
+        <div class="tab-content" id="tab-game">
+          <div class="game-control-embed">
+            <div class="game-sync-header">
+              <div class="form-group">
+                <label>Koneksikan Chat TikTok Penonton</label>
+                <div class="input-with-button">
+                  <input type="text" id="tiktokUsernameInput" class="form-input" placeholder="Username TikTok Anda (cth: wahid672)" value="wahid672">
+                  <button type="button" class="btn-primary" id="connectTTChatBtn">Hubungkan Chat</button>
+                </div>
+                <small id="chatConnectStatus" class="helper-text">Masukkan username akun Anda agar kuis membaca jawaban penonton secara live.</small>
+              </div>
+            </div>
+
+            <div class="quick-links">
+              <a href="http://localhost:3000/control.html" target="_blank" class="btn-secondary">
+                ↗️ Buka Kontrol Panel Lengkap Game
+              </a>
+            </div>
+
+            <iframe id="gameControlIframe" src="http://localhost:3000/control.html" class="embedded-control-frame"></iframe>
+          </div>
+        </div>
+
+        <!-- Tab 3: System Logs -->
+        <div class="tab-content" id="tab-logs">
+          <div class="logs-header">
+            <span>Aktivitas Sistem & RTMP Engine</span>
+            <button class="btn-text" id="clearLogsBtn">Bersihkan Tampilan</button>
+          </div>
+          <div class="logs-terminal" id="logsTerminal">
+            <div class="log-line text-muted">Menunggu aktivitas sistem...</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Live Vertical Phone Preview -->
+      <section class="preview-card">
+        <div class="preview-header">
+          <div class="preview-title">
+            <span>📱 Monitor Siaran Vertikal (9:16)</span>
+          </div>
+          <div class="preview-actions">
+            <a id="openOverlayLink" href="http://localhost:3000" target="_blank" class="preview-btn">↗️ Buka di Tab Baru</a>
+          </div>
+        </div>
+
+        <div class="phone-frame-container">
+          <div class="phone-mockup">
+            <div class="phone-screen">
+              <iframe id="previewIframe" src="http://localhost:3000"></iframe>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

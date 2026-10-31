@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Control Panel - TikTok LIVE Math Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/control.css">
+</head>
+<body>
+  <div class="control-layout">
+    <!-- Header -->
+    <header class="panel-header">
+      <div class="brand">
+        <span class="logo-emoji">🎛️</span>
+        <div>
+          <h1>Streamer Control Panel</h1>
+          <p>TikTok LIVE Interactive Math Quiz</p>
+        </div>
+      </div>
+      <div class="quick-links">
+        <a href="/" target="_blank" class="btn-obs-link">👁️ Buka Tampilan Overlay</a>
+      </div>
+    </header>
+
+    <div class="grid-container">
+      <!-- 1. TikTok LIVE Connection -->
+      <section class="card tiktok-card">
+        <div class="card-header">
+          <span class="card-icon">🔴</span>
+          <h2>Koneksi TikTok LIVE</h2>
+        </div>
+        <p class="card-desc">Cukup masukkan username akun TikTok Anda saat siaran LIVE sedang berjalan. Tanpa perlu password!</p>
+        
+        <div class="input-group">
+          <label for="tiktokUsernameInput">Username TikTok Anda:</label>
+          <div class="input-with-button">
+            <span class="at-prefix">@</span>
+            <input type="text" id="tiktokUsernameInput" placeholder="username_tiktok_anda" spellcheck="false">
+            <button id="btnConnectTikTok" class="btn-primary">Hubungkan</button>
+            <button id="btnDisconnectTikTok" class="btn-danger" style="display:none;">Putus</button>
+          </div>
+        </div>
+
+        <div class="status-indicator-box">
+          Status: <span id="tiktokStatusText" class="badge-disconnected">Belum Terhubung</span>
+        </div>
+      </section>
+
+      <!-- 2. Game Settings & Controls -->
+      <section class="card game-card">
+        <div class="card-header">
+          <span class="card-icon">⚡</span>
+          <h2>Kontrol Permainan</h2>
+        </div>
+
+        <div class="btn-row">
+          <button id="btnTogglePlay" class="btn-action btn-pause">⏸️ Jeda Game</button>
+          <button id="btnSkipQuestion" class="btn-action btn-skip">⏭️ Lewati Soal</button>
+          <button id="btnResetLeaderboard" class="btn-action btn-reset">🗑️ Reset Skor</button>
+        </div>
+
+        <div class="settings-grid">
+          <div class="setting-item">
+            <label for="difficultySelect">Tingkat Kesulitan:</label>
+            <select id="difficultySelect">
+              <option value="easy">Mudah (+, -)</option>
+              <option value="medium" selected>Sedang (+, -, ×)</option>
+              <option value="hard">Sulit (×, ÷, Campuran)</option>
+            </select>
+          </div>
+
+          <div class="setting-item">
+            <label for="durationSelect">Waktu per Soal:</label>
+            <select id="durationSelect">
+              <option value="10">10 Detik</option>
+              <option value="15">15 Detik</option>
+              <option value="20" selected>20 Detik</option>
+              <option value="30">30 Detik</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Current Question Monitor -->
+      <section class="card monitor-card">
+        <div class="card-header">
+          <span class="card-icon">👀</span>
+          <h2>Soal yang Tampil Sekarang</h2>
+        </div>
+        <div class="monitor-display">
+          <div class="monitor-question" id="monitorQuestion">12 × 4 = ?</div>
+          <div class="monitor-answer">Kunci Jawaban: <span id="monitorAnswer" class="highlight-ans">48</span></div>
+          <div class="monitor-timer">Sisa Waktu: <span id="monitorTimeLeft">20</span>s</div>
+        </div>
+      </section>
+
+      <!-- 4. Simulator / Test Tool -->
+      <section class="card sim-card">
+        <div class="card-header">
+          <span class="card-icon">🧪</span>
+          <h2>Uji Coba & Simulasi (Tanpa LIVE)</h2>
+        </div>
+        <p class="card-desc">Gunakan ini untuk mengetes animasi confetti, suara, dan perolehan poin sebelum mulai live.</p>
+
+        <div class="sim-form">
+          <input type="text" id="simName" placeholder="Nama Penonton (Contoh: Budi)" value="Budi Gamer">
+          <input type="text" id="simComment" placeholder="Komentar (Contoh: 48)">
+          <div class="sim-buttons">
+            <button id="btnSimulateGuess" class="btn-secondary">Kirim Tebakan</button>
+            <button id="btnSimulateWinner" class="btn-gold">✨ Kirim Jawaban Benar (Test Menang)</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. OBS Integration Instructions -->
+      <section class="card obs-card">
+        <div class="card-header">
+          <span class="card-icon">🎥</span>
+          <h2>Petunjuk Memasukkan ke OBS Studio</h2>
+        </div>
+        <ol class="obs-steps">
+          <li>Buka <strong>OBS Studio</strong>.</li>
+          <li>Di panel <strong>Sources (Sumber)</strong>, klik tombol <strong>`+`</strong> ➔ pilih <strong>Browser</strong>.</li>
+          <li>Masukkan URL: <code id="obsUrlCode">http://localhost:3000</code></li>
+          <li>Atur Resolusi:
+            <ul>
+              <li><strong>Width:</strong> <code>1080</code> (atau <code>600</code>)</li>
+              <li><strong>Height:</strong> <code>1920</code> (atau <code>900</code>)</li>
+            </ul>
+          </li>
+          <li>Centang opsi <strong>"Control audio via OBS"</strong> jika ingin audio game diatur melalui mixer OBS.</li>
+          <li>Klik <strong>OK</strong> dan posisikan game di layar live streaming Anda!</li>
+        </ol>
+      </section>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/control.js"></script>
+</body>
+</html>

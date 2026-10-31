@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TikTok LIVE Math Quiz Overlay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/overlay.css">
+</head>
+<body>
+  <div class="overlay-container">
+    <!-- Header Streamer & Status -->
+    <header class="game-header">
+      <div class="live-badge">
+        <span class="pulsing-dot"></span>
+        <span id="liveStatusText">LIVE INTERAKTIF</span>
+      </div>
+      <h1 class="main-title">TEBAK MATEMATIKA</h1>
+      <div class="round-counter">
+        Soal ke-<span id="questionCount">1</span>
+      </div>
+    </header>
+
+    <!-- Main Question Box -->
+    <main class="question-container">
+      <div class="glass-card question-card">
+        <div class="badge-difficulty" id="difficultyBadge">SEDANG</div>
+        
+        <div class="math-problem" id="mathProblem">
+          <span class="calc-text">Memuat...</span>
+        </div>
+
+        <!-- Timer Bar -->
+        <div class="timer-wrapper">
+          <div class="timer-bar-bg">
+            <div class="timer-bar-fill" id="timerBar"></div>
+          </div>
+          <div class="timer-text" id="timerText">20s</div>
+        </div>
+
+        <div class="cta-banner">
+          <span class="cta-icon">💬</span> Ketik angka jawabanmu di komentar!
+        </div>
+      </div>
+
+      <!-- Winner Popup Alert -->
+      <div class="winner-modal" id="winnerModal">
+        <div class="winner-glow"></div>
+        <div class="winner-content">
+          <div class="trophy-icon">🏆</div>
+          <div class="winner-label">JAWABAN BENAR!</div>
+          <div class="winner-avatar-wrap">
+            <img id="winnerAvatar" src="" alt="Winner Avatar" class="winner-avatar">
+          </div>
+          <div class="winner-name" id="winnerName">User</div>
+          <div class="winner-points" id="winnerPoints">+15 POIN</div>
+          <div class="winner-answer" id="winnerAnswer">Jawaban: <span id="winnerAnswerNum">0</span></div>
+        </div>
+      </div>
+
+      <!-- Timeout Alert -->
+      <div class="timeout-modal" id="timeoutModal">
+        <div class="timeout-content">
+          <div class="timeout-icon">⏰</div>
+          <div class="timeout-label">WAKTU HABIS!</div>
+          <div class="timeout-answer">Jawabannya adalah: <span id="timeoutAnswerNum">0</span></div>
+        </div>
+      </div>
+    </main>
+
+    <!-- Realtime Guesses Stream -->
+    <section class="live-guesses-section">
+      <div class="section-title">💬 Tebakan Penonton Terkini:</div>
+      <div class="guess-feed-container" id="guessFeed">
+        <!-- Live guesses pop here -->
+      </div>
+    </section>
+
+    <!-- Live Leaderboard -->
+    <footer class="leaderboard-section">
+      <div class="leaderboard-header">
+        <span class="lb-title">🏆 KLASEMEN JUARA TOP 5</span>
+        <span class="lb-subtitle">Poin Terbanyak</span>
+      </div>
+      <div class="leaderboard-list" id="leaderboardList">
+        <div class="lb-empty">Belum ada pemenang ronde. Jadilah yang pertama!</div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Audio & Socket scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/vendor/confetti.browser.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/overlay.js"></script>
+</body>
+</html>
