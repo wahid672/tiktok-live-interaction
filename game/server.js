@@ -2,7 +2,13 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const { TikTokLiveConnection } = require('tiktok-live-connector');
+const { execSync } = require('child_process');
+const { WebcastPushConnection, signatureProvider } = require('tiktok-live-connector');
+
+// Disable EulerStream paid cloud signer to prevent Business Plan 403 blocks
+if (signatureProvider && signatureProvider.config) {
+  signatureProvider.config.enabled = false;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -12,6 +18,19 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor', express.static(path.join(__dirname, 'node_modules/canvas-confetti/dist')));
+
+// Auto-detect TikTok username from active Chrome session
+let detectedUsername = 'wahid_studio';
+try {
+  const pyCmd = "python3 -c \"import sys; sys.path.insert(0, '/data/workspace/tiktok-live-interaction'); import tiktok; print(tiktok._session().get('https://www.tiktok.com/passport/web/account/info/', timeout=5).json().get('data',{}).get('username',''))\"";
+  const user = execSync(pyCmd, { timeout: 6000, encoding: 'utf-8' }).trim();
+  if (user) {
+    detectedUsername = user;
+    console.log(`[TikTok] Successfully detected logged-in user: @${detectedUsername}`);
+  }
+} catch (e) {
+  console.log('[TikTok] Using fallback username: @wahid_studio');
+}
 
 // Game State
 const gameState = {
@@ -23,9 +42,10 @@ const gameState = {
   roundStatus: 'active', // active, celebrating, timeout, paused
   winner: null,
   leaderboard: {}, // uniqueId -> { nickname, avatarUrl, points, wins }
-  tiktokUsername: '',
+  tiktokUsername: detectedUsername,
   isConnectedToTikTok: false,
-  totalQuestionsPlayed: 0
+  totalQuestionsPlayed: 0,
+  lastError: null
 };
 
 let timerInterval = null;
@@ -62,7 +82,6 @@ function generateQuestion(difficulty) {
       a = b * answer;
       questionText = `${a} ÷ ${b}`;
     } else {
-      // combo: (a + b) x c or a x b - c
       a = Math.floor(Math.random() * 9) + 2;
       b = Math.floor(Math.random() * 9) + 2;
       const c = Math.floor(Math.random() * 20) + 5;
@@ -101,29 +120,30 @@ function generateQuestion(difficulty) {
 }
 
 function startNewRound() {
-  if (!gameState.isRunning) {
-    gameState.roundStatus = 'paused';
-    io.emit('gameStateUpdate', getPublicState());
-    return;
-  }
+  if (!gameState.isRunning) return;
 
-  gameState.totalQuestionsPlayed++;
   gameState.currentQuestion = generateQuestion(gameState.difficulty);
   gameState.timeLeft = gameState.roundDuration;
   gameState.roundStatus = 'active';
   gameState.winner = null;
+  gameState.totalQuestionsPlayed++;
 
-  io.emit('newRound', {
+  io.emit('newQuestion', {
     question: gameState.currentQuestion,
+    roundDuration: gameState.roundDuration,
     timeLeft: gameState.timeLeft,
     totalQuestions: gameState.totalQuestionsPlayed
   });
 
   io.emit('gameStateUpdate', getPublicState());
+  resetTimer();
+}
 
+function resetTimer() {
   if (timerInterval) clearInterval(timerInterval);
+
   timerInterval = setInterval(() => {
-    if (gameState.roundStatus !== 'active') return;
+    if (!gameState.isRunning || gameState.roundStatus !== 'active') return;
 
     gameState.timeLeft--;
     io.emit('timerTick', { timeLeft: gameState.timeLeft });
@@ -138,84 +158,83 @@ function startNewRound() {
 function handleRoundTimeout() {
   gameState.roundStatus = 'timeout';
   io.emit('roundTimeout', {
-    correctAnswer: gameState.currentQuestion.answer,
-    questionText: gameState.currentQuestion.questionText
+    correctAnswer: gameState.currentQuestion.answer
   });
   io.emit('gameStateUpdate', getPublicState());
 
-  // Wait 4 seconds then next question
   setTimeout(() => {
     if (gameState.isRunning) startNewRound();
-  }, 4000);
+  }, 3500);
 }
 
 function handleRoundWinner(winnerData) {
   if (gameState.roundStatus !== 'active') return;
-  if (timerInterval) clearInterval(timerInterval);
 
   gameState.roundStatus = 'celebrating';
-  const speedBonus = Math.max(0, Math.floor(gameState.timeLeft / 2));
-  const pointsEarned = 10 + speedBonus;
+  if (timerInterval) clearInterval(timerInterval);
 
-  // Update leaderboard
-  const uid = winnerData.uniqueId || 'guest';
-  if (!gameState.leaderboard[uid]) {
-    gameState.leaderboard[uid] = {
-      uniqueId: uid,
-      nickname: winnerData.nickname || uid,
-      avatarUrl: winnerData.avatarUrl || '',
+  const { uniqueId, nickname, avatarUrl } = winnerData;
+  if (!gameState.leaderboard[uniqueId]) {
+    gameState.leaderboard[uniqueId] = {
+      uniqueId,
+      nickname,
+      avatarUrl: avatarUrl || '/images/default-avatar.png',
       points: 0,
       wins: 0
     };
   }
-  gameState.leaderboard[uid].points += pointsEarned;
-  gameState.leaderboard[uid].wins += 1;
-  gameState.leaderboard[uid].nickname = winnerData.nickname || gameState.leaderboard[uid].nickname;
-  if (winnerData.avatarUrl) gameState.leaderboard[uid].avatarUrl = winnerData.avatarUrl;
+
+  const basePoints = gameState.difficulty === 'easy' ? 10 : gameState.difficulty === 'medium' ? 25 : 50;
+  const timeBonus = Math.floor(gameState.timeLeft * 1.5);
+  const earned = basePoints + timeBonus;
+
+  gameState.leaderboard[uniqueId].points += earned;
+  gameState.leaderboard[uniqueId].wins += 1;
+  gameState.leaderboard[uniqueId].nickname = nickname;
+  if (avatarUrl) gameState.leaderboard[uniqueId].avatarUrl = avatarUrl;
 
   gameState.winner = {
-    ...winnerData,
-    pointsEarned,
-    speedBonus
+    uniqueId,
+    nickname,
+    avatarUrl: gameState.leaderboard[uniqueId].avatarUrl,
+    pointsEarned: earned,
+    totalPoints: gameState.leaderboard[uniqueId].points,
+    wins: gameState.leaderboard[uniqueId].wins,
+    answer: gameState.currentQuestion.answer
   };
 
   io.emit('roundWinner', {
     winner: gameState.winner,
-    correctAnswer: gameState.currentQuestion.answer,
     leaderboard: getTopLeaderboard()
   });
-
   io.emit('gameStateUpdate', getPublicState());
 
-  // Wait 4.5 seconds celebrate then next round
   setTimeout(() => {
     if (gameState.isRunning) startNewRound();
-  }, 4500);
+  }, 5000);
 }
 
-function handleIncomingComment(commentData) {
-  const { uniqueId, nickname, avatarUrl, comment } = commentData;
-  if (!comment) return;
+function checkGuess(commentText) {
+  if (!gameState.currentQuestion || gameState.roundStatus !== 'active') return false;
 
-  // Extract all numbers
-  const matches = comment.match(/-?\d+/g);
-  let isCorrect = false;
+  const correctAnswer = gameState.currentQuestion.answer;
+  const text = commentText.trim().replace(/,/g, '');
+  const tokens = text.split(/[\s,]+/);
 
-  if (gameState.roundStatus === 'active' && gameState.currentQuestion && matches) {
-    const targetAns = gameState.currentQuestion.answer;
-    for (const m of matches) {
-      if (parseInt(m, 10) === targetAns) {
-        isCorrect = true;
-        break;
-      }
-    }
+  for (const token of tokens) {
+    if (token === `${correctAnswer}`) return true;
   }
+  return false;
+}
 
-  // Broadcast comment to overlay for live guess feed
-  io.emit('guessFeed', {
+function handleIncomingComment({ uniqueId, nickname, avatarUrl, comment }) {
+  if (gameState.roundStatus !== 'active') return;
+
+  const isCorrect = checkGuess(comment);
+  io.emit('chatComment', {
     uniqueId,
     nickname,
-    avatarUrl,
+    avatarUrl: avatarUrl || '/images/default-avatar.png',
     comment,
     isCorrect
   });
@@ -248,13 +267,14 @@ function getPublicState() {
     leaderboard: getTopLeaderboard(),
     tiktokUsername: gameState.tiktokUsername,
     isConnectedToTikTok: gameState.isConnectedToTikTok,
-    totalQuestions: gameState.totalQuestionsPlayed
+    totalQuestions: gameState.totalQuestionsPlayed,
+    lastError: gameState.lastError
   };
 }
 
 // TikTok Connection Management
 function connectTikTok(username) {
-  const cleanUsername = username.replace(/^@/, '').trim();
+  const cleanUsername = (username || gameState.tiktokUsername || '').replace(/^@/, '').trim();
   if (!cleanUsername) return;
 
   if (tiktokLiveConnection) {
@@ -263,14 +283,19 @@ function connectTikTok(username) {
   }
 
   gameState.tiktokUsername = cleanUsername;
+  gameState.lastError = null;
+
   try {
-    tiktokLiveConnection = new TikTokLiveConnection(cleanUsername, {
+    tiktokLiveConnection = new WebcastPushConnection(cleanUsername, {
       processInitialData: false,
-      enableExtendedGiftInfo: true
+      enableExtendedGiftInfo: true,
+      enableWebsocketUpgrade: true,
+      requestPollingIntervalMs: 1000
     });
   } catch (err) {
     gameState.isConnectedToTikTok = false;
-    io.emit('tiktokStatus', { connected: false, error: err.message || err.toString() });
+    gameState.lastError = err.message || err.toString();
+    io.emit('tiktokStatus', { connected: false, error: gameState.lastError });
     io.emit('gameStateUpdate', getPublicState());
     return;
   }
@@ -278,15 +303,23 @@ function connectTikTok(username) {
   tiktokLiveConnection.connect()
     .then(state => {
       gameState.isConnectedToTikTok = true;
+      gameState.lastError = null;
       const roomId = state && state.roomId ? state.roomId : 'LIVE';
-      console.log(`[TikTok] Connected to LIVE room of @${cleanUsername} (Room ID: ${roomId})`);
+      console.log(`[TikTok] Successfully connected to LIVE room of @${cleanUsername} (Room ID: ${roomId})`);
       io.emit('tiktokStatus', { connected: true, username: cleanUsername, roomId });
       io.emit('gameStateUpdate', getPublicState());
     })
     .catch(err => {
       gameState.isConnectedToTikTok = false;
-      console.error(`[TikTok] Connection error:`, err.toString());
-      io.emit('tiktokStatus', { connected: false, error: err.message || err.toString() });
+      let msg = err.message || err.toString();
+      if (msg.includes('user_not_found') || msg.includes('19881007')) {
+        msg = `Akun @${cleanUsername} tidak ditemukan. Pastikan username TikTok Anda sudah benar (contoh: wahid_studio).`;
+      } else if (msg.includes('ended') || msg.includes('Missing cursor') || msg.includes('offline')) {
+        msg = `Akun @${cleanUsername} saat ini SEDANG TIDAK LIVE. Mulai live streaming dulu, lalu klik Hubungkan!`;
+      }
+      gameState.lastError = msg;
+      console.error(`[TikTok] Connection error for @${cleanUsername}:`, msg);
+      io.emit('tiktokStatus', { connected: false, error: msg });
       io.emit('gameStateUpdate', getPublicState());
     });
 
@@ -313,59 +346,55 @@ function connectTikTok(username) {
 
   tiktokLiveConnection.on('disconnected', () => {
     gameState.isConnectedToTikTok = false;
+    gameState.lastError = 'Terputus dari live TikTok';
     io.emit('tiktokStatus', { connected: false, message: 'Disconnected from TikTok' });
     io.emit('gameStateUpdate', getPublicState());
   });
 
   tiktokLiveConnection.on('streamEnd', () => {
     gameState.isConnectedToTikTok = false;
+    gameState.lastError = 'Live streaming TikTok telah berakhir';
     io.emit('tiktokStatus', { connected: false, message: 'Stream ended' });
     io.emit('gameStateUpdate', getPublicState());
   });
 }
 
-function disconnectTikTok() {
-  if (tiktokLiveConnection) {
-    try { tiktokLiveConnection.disconnect(); } catch (e) {}
-    tiktokLiveConnection = null;
-  }
-  gameState.isConnectedToTikTok = false;
-  io.emit('tiktokStatus', { connected: false });
-  io.emit('gameStateUpdate', getPublicState());
-}
-
-// Socket.IO Communication
-io.on('connection', socket => {
+// Socket.IO Handlers
+io.on('connection', (socket) => {
   socket.emit('gameStateUpdate', getPublicState());
 
-  socket.on('requestState', () => {
-    socket.emit('gameStateUpdate', getPublicState());
+  socket.on('connectTikTok', ({ username }) => {
+    console.log(`[Socket] Request to connect TikTok: @${username}`);
+    connectTikTok(username);
   });
 
-  // Admin Controls
-  socket.on('setRunning', (running) => {
-    gameState.isRunning = Boolean(running);
-    if (gameState.isRunning && gameState.roundStatus === 'paused') {
-      startNewRound();
-    } else if (!gameState.isRunning) {
-      gameState.roundStatus = 'paused';
+  socket.on('disconnectTikTok', () => {
+    if (tiktokLiveConnection) {
+      try { tiktokLiveConnection.disconnect(); } catch (e) {}
+      tiktokLiveConnection = null;
     }
+    gameState.isConnectedToTikTok = false;
+    gameState.lastError = null;
+    io.emit('tiktokStatus', { connected: false, message: 'Manually disconnected' });
+    io.emit('gameStateUpdate', getPublicState());
+  });
+
+  socket.on('setRunning', (isRunning) => {
+    gameState.isRunning = isRunning;
+    if (!isRunning && timerInterval) clearInterval(timerInterval);
+    if (isRunning && gameState.roundStatus === 'active') resetTimer();
     io.emit('gameStateUpdate', getPublicState());
   });
 
   socket.on('setDifficulty', (diff) => {
-    if (['easy', 'medium', 'hard'].includes(diff)) {
-      gameState.difficulty = diff;
-      io.emit('gameStateUpdate', getPublicState());
-    }
+    gameState.difficulty = diff;
+    startNewRound();
   });
 
-  socket.on('setDuration', (dur) => {
-    const val = parseInt(dur, 10);
-    if (val >= 5 && val <= 60) {
-      gameState.roundDuration = val;
-      io.emit('gameStateUpdate', getPublicState());
-    }
+  socket.on('setDuration', (sec) => {
+    gameState.roundDuration = parseInt(sec, 10);
+    gameState.timeLeft = gameState.roundDuration;
+    io.emit('gameStateUpdate', getPublicState());
   });
 
   socket.on('skipQuestion', () => {
@@ -374,35 +403,30 @@ io.on('connection', socket => {
 
   socket.on('resetLeaderboard', () => {
     gameState.leaderboard = {};
+    io.emit('leaderboardUpdate', []);
     io.emit('gameStateUpdate', getPublicState());
   });
 
-  socket.on('connectTikTok', ({ username }) => {
-    connectTikTok(username);
-  });
-
-  socket.on('disconnectTikTok', () => {
-    disconnectTikTok();
-  });
-
-  // Simulation / Test comments
   socket.on('simulateComment', ({ nickname, comment }) => {
     handleIncomingComment({
-      uniqueId: 'sim_' + (nickname || 'tester').toLowerCase().replace(/\s+/g, '_'),
-      nickname: nickname || 'Tester',
-      avatarUrl: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(nickname || 'test')}`,
-      comment: String(comment || '')
+      uniqueId: `sim_${Date.now()}`,
+      nickname: nickname || 'Penonton Setia',
+      avatarUrl: '',
+      comment: comment
     });
   });
 });
 
-// Start initial game
-startNewRound();
+app.get('/api/state', (req, res) => {
+  res.json(getPublicState());
+});
 
-server.listen(PORT, '0.0.0.0', () => {
+// Start server
+server.listen(PORT, () => {
   console.log(`=======================================================`);
   console.log(`🎮 TikTok LIVE Interactive Math Game Server Started!`);
-  console.log(`📺 OBS Overlay URL: http://localhost:${PORT}`);
-  console.log(`🎛️  Control Panel:   http://localhost:${PORT}/control.html`);
+  console.log(`📺 OBS / Streamer Overlay: http://localhost:${PORT}`);
+  console.log(`🎛️  Control Panel:         http://localhost:${PORT}/control.html`);
   console.log(`=======================================================`);
+  startNewRound();
 });

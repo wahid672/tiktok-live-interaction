@@ -32,6 +32,9 @@ btnConnectTikTok.addEventListener('click', () => {
   }
   btnConnectTikTok.disabled = true;
   btnConnectTikTok.textContent = 'Menghubungkan...';
+  tiktokStatusText.className = 'badge-disconnected';
+  tiktokStatusText.style.color = '#f59e0b';
+  tiktokStatusText.textContent = `⏳ Menghubungkan ke @${username}...`;
   socket.emit('connectTikTok', { username });
 });
 
@@ -83,6 +86,11 @@ btnSimulateWinner.addEventListener('click', () => {
 socket.on('gameStateUpdate', (state) => {
   currentGameState = state;
 
+  // Auto-fill username if empty
+  if (state.tiktokUsername && !tiktokUsernameInput.value) {
+    tiktokUsernameInput.value = state.tiktokUsername;
+  }
+
   // Update Game Controls
   if (state.isRunning) {
     btnTogglePlay.textContent = '⏸️ Jeda Game';
@@ -105,18 +113,27 @@ socket.on('gameStateUpdate', (state) => {
   // TikTok Status
   if (state.isConnectedToTikTok) {
     tiktokStatusText.className = 'badge-connected';
-    tiktokStatusText.textContent = `Terhubung ke @${state.tiktokUsername}`;
+    tiktokStatusText.style.color = '#10b981';
+    tiktokStatusText.textContent = `🟢 Terhubung ke @${state.tiktokUsername}`;
     btnConnectTikTok.style.display = 'none';
     btnDisconnectTikTok.style.display = 'inline-block';
     tiktokUsernameInput.disabled = true;
   } else {
-    tiktokStatusText.className = 'badge-disconnected';
-    tiktokStatusText.textContent = 'Belum Terhubung';
     btnConnectTikTok.style.display = 'inline-block';
     btnConnectTikTok.disabled = false;
     btnConnectTikTok.textContent = 'Hubungkan';
     btnDisconnectTikTok.style.display = 'none';
     tiktokUsernameInput.disabled = false;
+
+    if (state.lastError) {
+      tiktokStatusText.className = 'badge-disconnected';
+      tiktokStatusText.style.color = '#ef4444';
+      tiktokStatusText.textContent = `❌ ${state.lastError}`;
+    } else {
+      tiktokStatusText.className = 'badge-disconnected';
+      tiktokStatusText.style.color = '#94a3b8';
+      tiktokStatusText.textContent = 'Belum Terhubung';
+    }
   }
 });
 
@@ -127,15 +144,31 @@ socket.on('timerTick', ({ timeLeft }) => {
 socket.on('tiktokStatus', (data) => {
   if (data.connected) {
     tiktokStatusText.className = 'badge-connected';
-    tiktokStatusText.textContent = `Terhubung ke @${data.username}`;
+    tiktokStatusText.style.color = '#10b981';
+    tiktokStatusText.textContent = `🟢 Terhubung ke @${data.username}`;
     btnConnectTikTok.style.display = 'none';
     btnDisconnectTikTok.style.display = 'inline-block';
+    tiktokUsernameInput.disabled = true;
   } else {
-    tiktokStatusText.className = 'badge-disconnected';
-    tiktokStatusText.textContent = data.error ? `Error: ${data.error}` : 'Belum Terhubung';
     btnConnectTikTok.style.display = 'inline-block';
     btnConnectTikTok.disabled = false;
     btnConnectTikTok.textContent = 'Hubungkan';
     btnDisconnectTikTok.style.display = 'none';
+    tiktokUsernameInput.disabled = false;
+
+    tiktokStatusText.className = 'badge-disconnected';
+    tiktokStatusText.style.color = '#ef4444';
+    tiktokStatusText.textContent = data.error ? `❌ ${data.error}` : 'Belum Terhubung';
+  }
+});
+
+// Listen for cross-frame messages from Web Dashboard
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'CONNECT_TIKTOK') {
+    const user = event.data.username;
+    if (user) {
+      tiktokUsernameInput.value = user;
+      btnConnectTikTok.click();
+    }
   }
 });
