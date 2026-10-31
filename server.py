@@ -5,6 +5,7 @@ TikTok room creation, and math game integration.
 """
 import collections
 import os
+import subprocess
 import time
 from flask import Flask, jsonify, render_template, request, send_from_directory
 from flask_cors import CORS
@@ -32,10 +33,12 @@ def index():
 def get_status():
     session = tiktok.session_status()
     stream_status = streamer.get_status()
+    persisted_room = tiktok.get_active_room()
     return jsonify({
         "ok": True,
         "tiktok": session,
-        "streamer": stream_status
+        "streamer": stream_status,
+        "has_active_room": bool(persisted_room)
     })
 
 @app.route("/api/logs", methods=["GET"])
@@ -97,18 +100,67 @@ def start_stream():
 
 @app.route("/api/stream/stop", methods=["POST"])
 def stop_stream():
-    room = streamer.current_room
+    room = streamer.current_room or tiktok.get_active_room()
     log_event("Request to stop LIVE stream")
     streamer.stop()
 
+    closed_tiktok = False
     if room:
         try:
-            log_event("Notifying TikTok that LIVE has ended...")
-            tiktok.finish_room(log=log_event, room=room)
+            log_event(f"Notifying TikTok that LIVE has ended (Room: {room.get('room_id')})...")
+            closed_tiktok = tiktok.finish_room(log=log_event, room=room)
         except Exception as e:
             log_event(f"Notice on room finish: {e}")
+    else:
+        log_event("No active room record found to close.")
 
-    return jsonify({"ok": True, "message": "Live stream stopped."})
+    tiktok.clear_active_room()
+    streamer.current_room = None
+    return jsonify({
+        "ok": True,
+        "closed_tiktok": closed_tiktok,
+        "message": "Live stream stopped."
+    })
+
+@app.route("/api/stream/force-stop", methods=["POST"])
+def force_stop_stream():
+    log_event("⚡ [FORCE STOP] Request to forcefully terminate all live streams and close TikTok room!")
+
+    # 1. Stop streamer class & kill all potential streaming processes
+    streamer.stop()
+    try:
+        subprocess.run(["pkill", "-9", "-f", "Xvfb :99"], capture_output=True)
+        subprocess.run(["pkill", "-9", "-f", "tt-stream-overlay-chrome"], capture_output=True)
+        subprocess.run(["pkill", "-15", "obs"], capture_output=True)
+        log_event("Cleaned up virtual display, chrome kiosk, and encoder processes.")
+    except Exception as e:
+        log_event(f"Process cleanup notice: {e}")
+
+    # 2. Check and close room on TikTok server
+    room = streamer.current_room or tiktok.get_active_room()
+    closed_tiktok = False
+    if room:
+        try:
+            log_event(f"Sending finish signal to TikTok server for Room ID: {room.get('room_id')}...")
+            closed_tiktok = tiktok.finish_room(log=log_event, room=room)
+            if closed_tiktok:
+                log_event("✓ TikTok confirmed LIVE room has ended successfully!")
+            else:
+                log_event("TikTok finish ping sent.")
+        except Exception as e:
+            log_event(f"Error finishing TikTok room: {e}")
+    else:
+        log_event("No active room ID found. Cleaned up all local processes.")
+
+    tiktok.clear_active_room()
+    streamer.current_room = None
+    streamer.is_streaming = False
+
+    return jsonify({
+        "ok": True,
+        "closed_tiktok": closed_tiktok,
+        "message": "Siaran live berhasil dihentikan secara paksa dan room TikTok telah ditutup."
+    })
 
 if __name__ == "__main__":
     PORT = int(os.environ.get("PORT", 8080))

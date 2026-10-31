@@ -19,6 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const previewIframe = document.getElementById('previewIframe');
   const openOverlayLink = document.getElementById('openOverlayLink');
   
+  const navForceStopBtn = document.getElementById('navForceStopBtn');
+  const forceStopStreamBtn = document.getElementById('forceStopStreamBtn');
+  
   const logsTerminal = document.getElementById('logsTerminal');
   const clearLogsBtn = document.getElementById('clearLogsBtn');
   
@@ -203,6 +206,42 @@ document.addEventListener('DOMContentLoaded', () => {
       stopStreamBtn.innerHTML = '<span class="btn-icon">⏹️</span> Akhiri Live';
     }
   });
+
+  // 7.1 Force Stop Live (Terminates processes and forcefully finishes TikTok room)
+  async function handleForceStop() {
+    if (!confirm('⚠️ PAKSA HENTIKAN LIVE?\n\nTindakan ini akan:\n1. Mengirim sinyal resmi penutupan room ke server TikTok agar live tidak mengambang.\n2. Mematikan semua proses streaming latar belakang (GStreamer, Chrome Kiosk, Xvfb).\n\nLanjutkan?')) return;
+
+    const btns = [navForceStopBtn, forceStopStreamBtn].filter(Boolean);
+    btns.forEach(b => {
+      b.disabled = true;
+      b.textContent = '⏳ Memaksa Henti...';
+    });
+
+    try {
+      const res = await fetch('/api/stream/force-stop', { method: 'POST' });
+      const data = await res.json();
+      alert(data.message || 'Force stop berhasil dieksekusi!');
+      isStreaming = false;
+      startStreamBtn.classList.remove('hidden');
+      stopStreamBtn.classList.add('hidden');
+      checkStatus();
+      fetchLogs();
+    } catch (err) {
+      alert('Terjadi kesalahan saat force stop: ' + err.message);
+    } finally {
+      if (navForceStopBtn) {
+        navForceStopBtn.disabled = false;
+        navForceStopBtn.textContent = '⚡ Force Stop';
+      }
+      if (forceStopStreamBtn) {
+        forceStopStreamBtn.disabled = false;
+        forceStopStreamBtn.textContent = '⚡ Force Stop LIVE (Paksa Tutup Room TikTok & Matikan Semua Proses)';
+      }
+    }
+  }
+
+  navForceStopBtn?.addEventListener('click', handleForceStop);
+  forceStopStreamBtn?.addEventListener('click', handleForceStop);
 
   // 8. Connect TikTok Chat in Math Game
   connectTTChatBtn.addEventListener('click', () => {

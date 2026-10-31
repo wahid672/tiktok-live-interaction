@@ -177,6 +177,33 @@ def _csrf(log, s):
     log("CSRF=" + ("OBTAINED" if token else "NONE"))
     return token
 
+ACTIVE_ROOM_FILE = Path(__file__).resolve().parent / ".active_room.json"
+
+def save_active_room(room):
+    try:
+        import json
+        with open(ACTIVE_ROOM_FILE, "w", encoding="utf-8") as f:
+            json.dump(room, f)
+    except Exception as e:
+        print(f"Error saving active room to file: {e}")
+
+def get_active_room():
+    if ACTIVE_ROOM_FILE.exists():
+        try:
+            import json
+            with open(ACTIVE_ROOM_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
+
+def clear_active_room():
+    if ACTIVE_ROOM_FILE.exists():
+        try:
+            ACTIVE_ROOM_FILE.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 def create_room(log=_default_log, title=""):
     title = (title or "").strip() or "LIVE"
     s = _session(log)
@@ -203,24 +230,43 @@ def create_room(log=_default_log, title=""):
     log("RTMP=OBTAINED")
     room_id = data.get("id_str") or str(data.get("id") or "")
     owner = data.get("owner") or {}
-    return {
+    room_obj = {
         "url": url,
         "user": owner.get("display_id") or owner.get("unique_id") or "",
         "title": title,
         "room_id": room_id,
         "stream_id": data.get("stream_id_str") or str(data.get("stream_id") or "")
     }
+    save_active_room(room_obj)
+    return room_obj
 
 def finish_room(log=_default_log, room=None):
+    if not room:
+        room = get_active_room()
     if not room or not (room.get("room_id") and room.get("stream_id")):
+        log("ROOM_FINISH=SKIPPED no_active_room_found")
+        clear_active_room()
         return False
+
     s = _session(log)
+    ok = False
     try:
-        d = _json(log, "ROOM_FINISH", lambda: s.post(API + "room/ping/anchor/", params=WEB, timeout=15,
-                                                      data={"status": "4", "room_id": room["room_id"], "stream_id": room["stream_id"]}))
+        hdr = {"Content-Type": "application/x-www-form-urlencoded"}
+        token = _csrf(log, s)
+        if token:
+            hdr["x-secsdk-csrf-token"] = token
+        payload = {
+            "status": "4",
+            "room_id": str(room["room_id"]),
+            "stream_id": str(room["stream_id"])
+        }
+        d = _json(log, "ROOM_FINISH", lambda: s.post(API + "room/ping/anchor/", params={**WEB, **payload}, data=payload, headers=hdr, timeout=15))
+        ok = bool(d) and d.get("status_code") == 0
     finally:
         s.close()
-    return bool(d) and d.get("status_code") == 0
+        clear_active_room()
+    log("ROOM_FINISH=" + ("PASS" if ok else "FAIL"))
+    return ok
 
 if __name__ == "__main__":
     print("Testing session status...")
