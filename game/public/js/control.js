@@ -6,7 +6,13 @@ const btnConnectTikTok = document.getElementById('btnConnectTikTok');
 const btnDisconnectTikTok = document.getElementById('btnDisconnectTikTok');
 const tiktokStatusText = document.getElementById('tiktokStatusText');
 
+const streamDetectBanner = document.getElementById('streamDetectBanner');
+const livePulseDot = document.getElementById('livePulseDot');
+const streamDetectMsg = document.getElementById('streamDetectMsg');
+const btnQuickConnect = document.getElementById('btnQuickConnect');
+
 const btnTogglePlay = document.getElementById('btnTogglePlay');
+const togglePlayText = document.getElementById('togglePlayText');
 const btnSkipQuestion = document.getElementById('btnSkipQuestion');
 const btnResetLeaderboard = document.getElementById('btnResetLeaderboard');
 const difficultySelect = document.getElementById('difficultySelect');
@@ -16,26 +22,131 @@ const monitorQuestion = document.getElementById('monitorQuestion');
 const monitorAnswer = document.getElementById('monitorAnswer');
 const monitorTimeLeft = document.getElementById('monitorTimeLeft');
 
+// Comments Feed elements
+const commentCountBadge = document.getElementById('commentCountBadge');
+const btnClearComments = document.getElementById('btnClearComments');
+const commentsFeedWrapper = document.getElementById('commentsFeedWrapper');
+const emptyCommentsState = document.getElementById('emptyCommentsState');
+const commentsList = document.getElementById('commentsList');
+
+// Simulator elements
 const simName = document.getElementById('simName');
 const simComment = document.getElementById('simComment');
 const btnSimulateGuess = document.getElementById('btnSimulateGuess');
 const btnSimulateWinner = document.getElementById('btnSimulateWinner');
 
 let currentGameState = null;
+let totalComments = 0;
+
+// Format timestamp
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  return d.toTimeString().split(' ')[0];
+}
+
+// Add comment to feed
+function addCommentToFeed(c, shouldScroll = true) {
+  if (emptyCommentsState) {
+    emptyCommentsState.style.display = 'none';
+  }
+
+  totalComments++;
+  if (commentCountBadge) {
+    commentCountBadge.textContent = `${totalComments} komentar`;
+  }
+
+  const item = document.createElement('div');
+  item.className = `comment-item ${c.isCorrect ? 'correct' : ''}`;
+
+  const initial = (c.nickname || 'P').charAt(0).toUpperCase();
+  const avatarHtml = (c.avatarUrl && !c.avatarUrl.includes('default-avatar'))
+    ? `<img src="${c.avatarUrl}" alt="${c.nickname}" onerror="this.onerror=null;this.parentElement.textContent='${initial}';">`
+    : initial;
+
+  item.innerHTML = `
+    <div class="comment-avatar">${avatarHtml}</div>
+    <div class="comment-body">
+      <div class="comment-header">
+        <span class="comment-user">@${c.nickname || 'Penonton'}</span>
+        <span class="comment-time">${formatTime(c.timestamp)}</span>
+        ${c.isCorrect ? '<span class="tag-correct">🏆 JAWABAN BENAR</span>' : ''}
+      </div>
+      <div class="comment-text">${escapeHtml(c.comment || '')}</div>
+    </div>
+  `;
+
+  commentsList.appendChild(item);
+
+  // Keep list from growing unboundedly in DOM
+  while (commentsList.children.length > 80) {
+    commentsList.removeChild(commentsList.firstChild);
+  }
+
+  if (shouldScroll && commentsFeedWrapper) {
+    commentsFeedWrapper.scrollTop = commentsFeedWrapper.scrollHeight;
+  }
+}
+
+function escapeHtml(str) {
+  return str.replace(/[&<>'"]/g, tag => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;'
+  }[tag] || tag));
+}
+
+// Clear comments
+if (btnClearComments) {
+  btnClearComments.addEventListener('click', () => {
+    socket.emit('clearComments');
+  });
+}
+
+socket.on('commentsCleared', () => {
+  commentsList.innerHTML = '';
+  totalComments = 0;
+  if (commentCountBadge) commentCountBadge.textContent = '0 komentar';
+  if (emptyCommentsState) emptyCommentsState.style.display = 'flex';
+});
+
+socket.on('commentsHistory', (history) => {
+  commentsList.innerHTML = '';
+  totalComments = 0;
+  if (history && history.length > 0) {
+    if (emptyCommentsState) emptyCommentsState.style.display = 'none';
+    history.forEach(c => addCommentToFeed(c, false));
+    if (commentsFeedWrapper) commentsFeedWrapper.scrollTop = commentsFeedWrapper.scrollHeight;
+  } else {
+    if (emptyCommentsState) emptyCommentsState.style.display = 'flex';
+    if (commentCountBadge) commentCountBadge.textContent = '0 komentar';
+  }
+});
+
+socket.on('chatComment', (commentObj) => {
+  addCommentToFeed(commentObj, true);
+});
 
 // Connect / Disconnect TikTok
 btnConnectTikTok.addEventListener('click', () => {
-  const username = tiktokUsernameInput.value.trim();
-  if (!username) {
-    alert('Silakan masukkan username TikTok Anda terlebih dahulu!');
+  const val = tiktokUsernameInput.value.trim();
+  if (!val) {
+    alert('Silakan masukkan username TikTok atau Room ID Anda terlebih dahulu!');
     return;
   }
   btnConnectTikTok.disabled = true;
   btnConnectTikTok.textContent = 'Menghubungkan...';
   tiktokStatusText.className = 'badge-disconnected';
   tiktokStatusText.style.color = '#f59e0b';
-  tiktokStatusText.textContent = `⏳ Menghubungkan ke @${username}...`;
-  socket.emit('connectTikTok', { username });
+  tiktokStatusText.style.borderColor = '#f59e0b';
+  tiktokStatusText.textContent = `⏳ Menghubungkan ke ${val}...`;
+
+  const isNumericRoom = /^\d{15,22}$/.test(val);
+  socket.emit('connectTikTok', {
+    username: isNumericRoom ? '' : val,
+    roomId: isNumericRoom ? val : null
+  });
 });
 
 btnDisconnectTikTok.addEventListener('click', () => {
@@ -91,12 +202,35 @@ socket.on('gameStateUpdate', (state) => {
     tiktokUsernameInput.value = state.tiktokUsername;
   }
 
+  // Active Stream Detection Banner
+  if (state.activeRoom && state.activeRoom.room_id) {
+    livePulseDot.className = 'live-pulse-dot active';
+    streamDetectMsg.innerHTML = `<strong>🟢 Siaran LIVE Aktif di TikTok!</strong> Room ID: <code>${state.activeRoom.room_id}</code>`;
+    if (!state.isConnectedToTikTok) {
+      btnQuickConnect.style.display = 'inline-block';
+      btnQuickConnect.onclick = () => {
+        btnQuickConnect.disabled = true;
+        btnQuickConnect.textContent = 'Menghubungkan...';
+        socket.emit('connectTikTok', {
+          roomId: state.activeRoom.room_id,
+          username: state.activeRoom.user
+        });
+      };
+    } else {
+      btnQuickConnect.style.display = 'none';
+    }
+  } else {
+    livePulseDot.className = 'live-pulse-dot';
+    streamDetectMsg.textContent = 'Siaran LIVE TikTok belum dimulai. Klik "Mulai Live Sekarang" di Dashboard (port 8080) terlebih dahulu.';
+    btnQuickConnect.style.display = 'none';
+  }
+
   // Update Game Controls
   if (state.isRunning) {
-    btnTogglePlay.textContent = '⏸️ Jeda Game';
+    togglePlayText.textContent = 'Jeda Game';
     btnTogglePlay.className = 'btn-action btn-pause';
   } else {
-    btnTogglePlay.textContent = '▶️ Lanjutkan Game';
+    togglePlayText.textContent = 'Lanjutkan Game';
     btnTogglePlay.className = 'btn-action btn-primary';
   }
 
@@ -114,7 +248,8 @@ socket.on('gameStateUpdate', (state) => {
   if (state.isConnectedToTikTok) {
     tiktokStatusText.className = 'badge-connected';
     tiktokStatusText.style.color = '#10b981';
-    tiktokStatusText.textContent = `🟢 Terhubung ke @${state.tiktokUsername}`;
+    tiktokStatusText.style.borderColor = '#10b981';
+    tiktokStatusText.textContent = `🟢 Terhubung ke live chat @${state.tiktokUsername}`;
     btnConnectTikTok.style.display = 'none';
     btnDisconnectTikTok.style.display = 'inline-block';
     tiktokUsernameInput.disabled = true;
@@ -127,11 +262,13 @@ socket.on('gameStateUpdate', (state) => {
 
     if (state.lastError) {
       tiktokStatusText.className = 'badge-disconnected';
-      tiktokStatusText.style.color = '#ef4444';
+      tiktokStatusText.style.color = '#f87171';
+      tiktokStatusText.style.borderColor = 'rgba(239, 68, 68, 0.3)';
       tiktokStatusText.textContent = `❌ ${state.lastError}`;
     } else {
       tiktokStatusText.className = 'badge-disconnected';
-      tiktokStatusText.style.color = '#94a3b8';
+      tiktokStatusText.style.color = '#8b92a8';
+      tiktokStatusText.style.borderColor = 'rgba(255, 255, 255, 0.1)';
       tiktokStatusText.textContent = 'Belum Terhubung';
     }
   }
@@ -145,30 +282,35 @@ socket.on('tiktokStatus', (data) => {
   if (data.connected) {
     tiktokStatusText.className = 'badge-connected';
     tiktokStatusText.style.color = '#10b981';
-    tiktokStatusText.textContent = `🟢 Terhubung ke @${data.username}`;
+    tiktokStatusText.style.borderColor = '#10b981';
+    tiktokStatusText.textContent = `🟢 Terhubung ke live chat @${data.username} (Room ID: ${data.roomId || 'LIVE'})`;
     btnConnectTikTok.style.display = 'none';
     btnDisconnectTikTok.style.display = 'inline-block';
     tiktokUsernameInput.disabled = true;
+    if (btnQuickConnect) btnQuickConnect.style.display = 'none';
   } else {
     btnConnectTikTok.style.display = 'inline-block';
     btnConnectTikTok.disabled = false;
     btnConnectTikTok.textContent = 'Hubungkan';
     btnDisconnectTikTok.style.display = 'none';
     tiktokUsernameInput.disabled = false;
+    if (btnQuickConnect) btnQuickConnect.disabled = false;
 
     tiktokStatusText.className = 'badge-disconnected';
-    tiktokStatusText.style.color = '#ef4444';
+    tiktokStatusText.style.color = '#f87171';
+    tiktokStatusText.style.borderColor = 'rgba(239, 68, 68, 0.3)';
     tiktokStatusText.textContent = data.error ? `❌ ${data.error}` : 'Belum Terhubung';
   }
 });
 
-// Listen for cross-frame messages from Web Dashboard
+// Cross-frame messaging from Web Dashboard
 window.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'CONNECT_TIKTOK') {
     const user = event.data.username;
-    if (user) {
-      tiktokUsernameInput.value = user;
-      btnConnectTikTok.click();
+    const roomId = event.data.roomId;
+    if (roomId || user) {
+      if (user) tiktokUsernameInput.value = user;
+      socket.emit('connectTikTok', { username: user, roomId });
     }
   }
 });

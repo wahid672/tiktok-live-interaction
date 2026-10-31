@@ -35,6 +35,10 @@ document.addEventListener('DOMContentLoaded', () => {
   let timerInterval = null;
   let streamDurationSeconds = 0;
 
+  const ROCKET_SVG = `<svg class="btn-icon-svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+  const SPINNER_SVG = `<svg class="btn-icon-svg" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/></circle></svg>`;
+  const BOLT_SVG = `<svg class="icon-svg" viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path></svg>`;
+
   // 1. Tab Switching
   const tabBtns = document.querySelectorAll('.tab-btn');
   const tabContents = document.querySelectorAll('.tab-content');
@@ -145,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const [fps, bitrate] = streamFps.value.split('|').map(Number);
 
     startStreamBtn.disabled = true;
-    startStreamBtn.innerHTML = '<span class="btn-icon">⏳</span> Menghubungkan ke TikTok...';
+    startStreamBtn.innerHTML = `${SPINNER_SVG} Menghubungkan ke TikTok...`;
 
     try {
       const res = await fetch('/api/stream/start', {
@@ -165,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!data.ok) {
         alert('Gagal memulai Live: ' + (data.error || 'Unknown error'));
         startStreamBtn.disabled = false;
-        startStreamBtn.innerHTML = '<span class="btn-icon">🚀</span> Mulai Live Sekarang';
+        startStreamBtn.innerHTML = `${ROCKET_SVG} Mulai Live Sekarang`;
         return;
       }
 
@@ -174,8 +178,19 @@ document.addEventListener('DOMContentLoaded', () => {
       startStreamBtn.classList.add('hidden');
       stopStreamBtn.classList.remove('hidden');
       startStreamBtn.disabled = false;
-      startStreamBtn.innerHTML = '<span class="btn-icon">🚀</span> Mulai Live Sekarang';
+      startStreamBtn.innerHTML = `${ROCKET_SVG} Mulai Live Sekarang`;
       checkStatus();
+
+      // Automatically inform embedded game control to connect
+      if (gameControlIframe && gameControlIframe.contentWindow && data.room) {
+        setTimeout(() => {
+          gameControlIframe.contentWindow.postMessage({
+            type: 'CONNECT_TIKTOK',
+            username: data.room.user || 'wahid_studio',
+            roomId: data.room.room_id
+          }, '*');
+        }, 1000);
+      }
     } catch (err) {
       alert('Terjadi kesalahan jaringan: ' + err.message);
       startStreamBtn.disabled = false;
@@ -231,11 +246,11 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (navForceStopBtn) {
         navForceStopBtn.disabled = false;
-        navForceStopBtn.textContent = '⚡ Force Stop';
+        navForceStopBtn.innerHTML = `${BOLT_SVG} Force Stop`;
       }
       if (forceStopStreamBtn) {
         forceStopStreamBtn.disabled = false;
-        forceStopStreamBtn.textContent = '⚡ Force Stop LIVE (Paksa Tutup Room TikTok & Matikan Semua Proses)';
+        forceStopStreamBtn.innerHTML = `${BOLT_SVG} Force Stop LIVE (Paksa Tutup Room TikTok & Matikan Semua Proses)`;
       }
     }
   }

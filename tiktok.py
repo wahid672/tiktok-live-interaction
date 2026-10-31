@@ -240,6 +240,16 @@ def create_room(log=_default_log, title=""):
     save_active_room(room_obj)
     return room_obj
 
+def get_session_id(log=_default_log):
+    try:
+        s = _session(log)
+        for c in s.cookies:
+            if c.name in ("sessionid", "sessionid_ss") and c.value:
+                return c.value
+    except Exception:
+        pass
+    return ""
+
 def finish_room(log=_default_log, room=None):
     if not room:
         room = get_active_room()

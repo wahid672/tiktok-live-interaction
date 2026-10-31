@@ -23,6 +23,38 @@ def log_event(msg):
     print(entry)
     logs_queue.append(entry)
 
+def notify_game_connect(room):
+    try:
+        import urllib.request
+        import json
+        session_id = tiktok.get_session_id()
+        data = {
+            "roomId": room.get("room_id"),
+            "username": room.get("user") or "wahid_studio",
+            "sessionId": session_id
+        }
+        req = urllib.request.Request(
+            "http://127.0.0.1:3000/api/auto-connect",
+            data=json.dumps(data).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            log_event(f"Terkoneksi otomatis ke Game Matematika (Room ID: {room.get('room_id')})")
+    except Exception as e:
+        log_event(f"Notifikasi ke game server (port 3000): {e}")
+
+def notify_game_disconnect():
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "http://127.0.0.1:3000/api/disconnect-tiktok",
+            data=b"{}",
+            headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=2)
+    except Exception:
+        pass
+
 streamer = Streamer(log_cb=log_event)
 
 @app.route("/")
@@ -34,11 +66,14 @@ def get_status():
     session = tiktok.session_status()
     stream_status = streamer.get_status()
     persisted_room = tiktok.get_active_room()
+    session_id = tiktok.get_session_id()
     return jsonify({
         "ok": True,
         "tiktok": session,
         "streamer": stream_status,
-        "has_active_room": bool(persisted_room)
+        "has_active_room": bool(persisted_room),
+        "active_room": persisted_room,
+        "session_id": session_id
     })
 
 @app.route("/api/logs", methods=["GET"])
@@ -92,6 +127,9 @@ def start_stream():
     if not success:
         return jsonify({"ok": False, "error": msg}), 500
 
+    # Notify game server to auto-connect to live chat
+    notify_game_connect(room)
+
     return jsonify({
         "ok": True,
         "message": "Live stream started successfully!",
@@ -103,6 +141,7 @@ def stop_stream():
     room = streamer.current_room or tiktok.get_active_room()
     log_event("Request to stop LIVE stream")
     streamer.stop()
+    notify_game_disconnect()
 
     closed_tiktok = False
     if room:
@@ -128,6 +167,7 @@ def force_stop_stream():
 
     # 1. Stop streamer class & kill all potential streaming processes
     streamer.stop()
+    notify_game_disconnect()
     try:
         subprocess.run(["pkill", "-9", "-f", "Xvfb :99"], capture_output=True)
         subprocess.run(["pkill", "-9", "-f", "tt-stream-overlay-chrome"], capture_output=True)

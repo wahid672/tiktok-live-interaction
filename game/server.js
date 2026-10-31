@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
 const { execSync } = require('child_process');
 const { WebcastPushConnection, signatureProvider } = require('tiktok-live-connector');
 
@@ -16,6 +17,7 @@ const io = new Server(server, { cors: { origin: '*' } });
 
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/vendor', express.static(path.join(__dirname, 'node_modules/canvas-confetti/dist')));
 
@@ -227,19 +229,50 @@ function checkGuess(commentText) {
   return false;
 }
 
+const ACTIVE_ROOM_FILE = '/data/workspace/tiktok-live-interaction/.active_room.json';
+
+function getActiveRoomInfo() {
+  if (fs.existsSync(ACTIVE_ROOM_FILE)) {
+    try {
+      return JSON.parse(fs.readFileSync(ACTIVE_ROOM_FILE, 'utf-8'));
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function getChromeSessionId() {
+  try {
+    const pyCmd = "python3 -c \"import sys; sys.path.insert(0, '/data/workspace/tiktok-live-interaction'); import tiktok; print(tiktok.get_session_id())\"";
+    return execSync(pyCmd, { timeout: 3000, encoding: 'utf-8' }).trim();
+  } catch (e) {
+    return "";
+  }
+}
+
+const commentHistory = [];
+
 function handleIncomingComment({ uniqueId, nickname, avatarUrl, comment }) {
-  if (gameState.roundStatus !== 'active') return;
+  const isCorrect = (gameState.roundStatus === 'active') ? checkGuess(comment) : false;
 
-  const isCorrect = checkGuess(comment);
-  io.emit('chatComment', {
+  const commentObj = {
+    id: `c_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
     uniqueId,
-    nickname,
-    avatarUrl: avatarUrl || '/images/default-avatar.png',
+    nickname: nickname || 'Penonton',
+    avatarUrl: avatarUrl || '/images/default-avatar.svg',
     comment,
-    isCorrect
-  });
+    isCorrect,
+    timestamp: Date.now()
+  };
 
-  if (isCorrect) {
+  commentHistory.push(commentObj);
+  if (commentHistory.length > 100) commentHistory.shift();
+
+  // Emit to all connected clients (overlay and control panel)
+  io.emit('chatComment', commentObj);
+
+  if (isCorrect && gameState.roundStatus === 'active') {
     handleRoundWinner({
       uniqueId,
       nickname,
@@ -256,6 +289,7 @@ function getTopLeaderboard(limit = 5) {
 }
 
 function getPublicState() {
+  const activeRoom = getActiveRoomInfo();
   return {
     isRunning: gameState.isRunning,
     difficulty: gameState.difficulty,
@@ -268,14 +302,32 @@ function getPublicState() {
     tiktokUsername: gameState.tiktokUsername,
     isConnectedToTikTok: gameState.isConnectedToTikTok,
     totalQuestions: gameState.totalQuestionsPlayed,
-    lastError: gameState.lastError
+    lastError: gameState.lastError,
+    activeRoom: activeRoom
   };
 }
 
 // TikTok Connection Management
-function connectTikTok(username) {
-  const cleanUsername = (username || gameState.tiktokUsername || '').replace(/^@/, '').trim();
-  if (!cleanUsername) return;
+function connectTikTok(username, roomId = null, sessionId = null) {
+  let cleanInput = (username || gameState.tiktokUsername || '').replace(/^@/, '').trim();
+
+  // If user entered a numeric ID (TikTok room_id is usually a 19-digit number)
+  if (/^\d{15,22}$/.test(cleanInput)) {
+    roomId = cleanInput;
+  }
+
+  // If no roomId passed, check active room file from our streamer
+  if (!roomId) {
+    const activeRoom = getActiveRoomInfo();
+    if (activeRoom && activeRoom.room_id) {
+      roomId = activeRoom.room_id;
+      if (activeRoom.user && (!cleanInput || /^\d+$/.test(cleanInput))) {
+        cleanInput = activeRoom.user;
+      }
+    }
+  }
+
+  const cleanUsername = cleanInput || 'wahid_studio';
 
   if (tiktokLiveConnection) {
     try { tiktokLiveConnection.disconnect(); } catch (e) {}
@@ -285,13 +337,22 @@ function connectTikTok(username) {
   gameState.tiktokUsername = cleanUsername;
   gameState.lastError = null;
 
+  if (!sessionId) {
+    sessionId = getChromeSessionId();
+  }
+
+  const connOptions = {
+    processInitialData: false,
+    enableExtendedGiftInfo: true,
+    enableWebsocketUpgrade: true,
+    requestPollingIntervalMs: 1000
+  };
+  if (sessionId) {
+    connOptions.sessionId = sessionId;
+  }
+
   try {
-    tiktokLiveConnection = new WebcastPushConnection(cleanUsername, {
-      processInitialData: false,
-      enableExtendedGiftInfo: true,
-      enableWebsocketUpgrade: true,
-      requestPollingIntervalMs: 1000
-    });
+    tiktokLiveConnection = new WebcastPushConnection(cleanUsername, connOptions);
   } catch (err) {
     gameState.isConnectedToTikTok = false;
     gameState.lastError = err.message || err.toString();
@@ -300,13 +361,15 @@ function connectTikTok(username) {
     return;
   }
 
-  tiktokLiveConnection.connect()
+  console.log(`[TikTok] Connecting to @${cleanUsername}${roomId ? ` (Room ID: ${roomId})` : ''}...`);
+
+  tiktokLiveConnection.connect(roomId || null)
     .then(state => {
       gameState.isConnectedToTikTok = true;
       gameState.lastError = null;
-      const roomId = state && state.roomId ? state.roomId : 'LIVE';
-      console.log(`[TikTok] Successfully connected to LIVE room of @${cleanUsername} (Room ID: ${roomId})`);
-      io.emit('tiktokStatus', { connected: true, username: cleanUsername, roomId });
+      const connectedRoomId = (state && state.roomId) ? state.roomId : (roomId || 'LIVE');
+      console.log(`[TikTok] ✓ Berhasil terhubung ke LIVE room @${cleanUsername} (Room ID: ${connectedRoomId})`);
+      io.emit('tiktokStatus', { connected: true, username: cleanUsername, roomId: connectedRoomId });
       io.emit('gameStateUpdate', getPublicState());
     })
     .catch(err => {
@@ -315,7 +378,9 @@ function connectTikTok(username) {
       if (msg.includes('user_not_found') || msg.includes('19881007')) {
         msg = `Akun @${cleanUsername} tidak ditemukan. Pastikan username TikTok Anda sudah benar (contoh: wahid_studio).`;
       } else if (msg.includes('ended') || msg.includes('Missing cursor') || msg.includes('offline')) {
-        msg = `Akun @${cleanUsername} saat ini SEDANG TIDAK LIVE. Mulai live streaming dulu, lalu klik Hubungkan!`;
+        msg = `Akun @${cleanUsername} saat ini SEDANG TIDAK LIVE di TikTok. Silakan klik "Mulai Live Sekarang" di Web Dashboard (port 8080) terlebih dahulu!`;
+      } else if (msg.includes('ExtractRoomIdError') || msg.includes('room_id')) {
+        msg = `Belum bisa mengambil Room ID untuk @${cleanUsername}. Jika baru saja klik Mulai Live, tunggu 5-10 detik atau masukkan Room ID langsung.`;
       }
       gameState.lastError = msg;
       console.error(`[TikTok] Connection error for @${cleanUsername}:`, msg);
@@ -359,24 +424,34 @@ function connectTikTok(username) {
   });
 }
 
+function disconnectTikTok() {
+  if (tiktokLiveConnection) {
+    try { tiktokLiveConnection.disconnect(); } catch (e) {}
+    tiktokLiveConnection = null;
+  }
+  gameState.isConnectedToTikTok = false;
+  gameState.lastError = null;
+  io.emit('tiktokStatus', { connected: false, message: 'Disconnected' });
+  io.emit('gameStateUpdate', getPublicState());
+}
+
 // Socket.IO Handlers
 io.on('connection', (socket) => {
   socket.emit('gameStateUpdate', getPublicState());
+  socket.emit('commentsHistory', commentHistory);
 
-  socket.on('connectTikTok', ({ username }) => {
-    console.log(`[Socket] Request to connect TikTok: @${username}`);
-    connectTikTok(username);
+  socket.on('connectTikTok', ({ username, roomId }) => {
+    console.log(`[Socket] Request to connect TikTok: @${username || ''} (Room: ${roomId || 'auto'})`);
+    connectTikTok(username, roomId);
   });
 
   socket.on('disconnectTikTok', () => {
-    if (tiktokLiveConnection) {
-      try { tiktokLiveConnection.disconnect(); } catch (e) {}
-      tiktokLiveConnection = null;
-    }
-    gameState.isConnectedToTikTok = false;
-    gameState.lastError = null;
-    io.emit('tiktokStatus', { connected: false, message: 'Manually disconnected' });
-    io.emit('gameStateUpdate', getPublicState());
+    disconnectTikTok();
+  });
+
+  socket.on('clearComments', () => {
+    commentHistory.length = 0;
+    io.emit('commentsCleared');
   });
 
   socket.on('setRunning', (isRunning) => {
@@ -415,6 +490,32 @@ io.on('connection', (socket) => {
       comment: comment
     });
   });
+});
+
+// REST API Endpoints
+app.post('/api/auto-connect', (req, res) => {
+  const { roomId, username, sessionId } = req.body || {};
+  console.log(`[API] Auto-connect request: user=${username}, roomId=${roomId}`);
+  connectTikTok(username, roomId, sessionId);
+  res.json({ ok: true, message: 'Connecting...' });
+});
+
+app.post('/api/disconnect-tiktok', (req, res) => {
+  disconnectTikTok();
+  res.json({ ok: true });
+});
+
+app.get('/api/stream-info', (req, res) => {
+  const activeRoom = getActiveRoomInfo();
+  res.json({
+    ok: true,
+    hasActiveRoom: Boolean(activeRoom && activeRoom.room_id),
+    activeRoom
+  });
+});
+
+app.get('/api/comments', (req, res) => {
+  res.json({ ok: true, comments: commentHistory });
 });
 
 app.get('/api/state', (req, res) => {
